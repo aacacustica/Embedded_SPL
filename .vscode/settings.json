@@ -1,0 +1,4 @@
+{
+    "python.defaultInterpreterPath": "C:\\Users\\Martin\\Desktop\\IoT_microphone_scripts-main\\.venv\\bin\\python3.12",
+    "python.envFile": "${workspaceFolder}/.venv"
+}
