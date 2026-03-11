@@ -19,49 +19,48 @@ T = 1
 # REGULAR FUNCTIONS
 # -----------------------------------
 
-def upload_parts(s3,f,PART_SIZE,parts_count,storage_s3_bucket_name,object_key,idx,uploaded_parts):
-    
-    while True:
 
+
+def upload_parts(s3, f, PART_SIZE, parts_count, bucket, object_key, idx, uploaded_parts, logger):
+    while True:
         chunk = f.read(PART_SIZE)
         if not chunk:
             break
 
         part_key = f"{object_key}.part{idx:04d}"
-        logging.info(f"Uploading part {idx+1}/{parts_count} to {part_key} ...")
+        logger.info(f"Uploading part {idx+1}/{parts_count} to {part_key} ...")
 
-        #Uploading parts
         s3.put_object(
-            Bucket=                         storage_s3_bucket_name,
-            Key=                            part_key,
-            Body=                           chunk,
-            ContentLength=                  len(chunk),
-            ContentType=                    "application/octet-stream"
+            Bucket=bucket,
+            Key=part_key,
+            Body=chunk,
+            ContentLength=len(chunk),
+            ContentType="application/octet-stream",
         )
 
-        logging.info(f"Uploaded part {idx+1}/{parts_count} to {part_key} ...")
+        logger.info(f"Uploaded part {idx+1}/{parts_count} to {part_key}")
         uploaded_parts += 1
         idx += 1
 
-    return uploaded_parts,idx
+    return uploaded_parts, idx
 
 
-
-def upload_manifest(s3,file,storage_s3_bucket_name,object_key,PART_SIZE,uploaded_parts):
+def upload_manifest(s3, file_path, bucket, object_key, PART_SIZE, uploaded_parts, logger):
     manifest_body = (
-    f"version=1\n"
-    f"bucket=                           {storage_s3_bucket_name}\n"
-    f"original_key=                     {object_key}\n"
-    f"part_size=                        {PART_SIZE}\n"
-    f"parts=                            {uploaded_parts}\n"
+        f"version=1\n"
+        f"bucket={bucket}\n"
+        f"original_key={object_key}\n"
+        f"part_size={PART_SIZE}\n"
+        f"parts={uploaded_parts}\n"
     )
 
     s3.put_object(
-        Bucket=                             storage_s3_bucket_name,
-        Key=                                f"{object_key}.manifest",
-        Body=                               manifest_body.encode("utf-8"),
-        ContentType=                        "text/plain"
+        Bucket=bucket,
+        Key=f"{object_key}.manifest",
+        Body=manifest_body.encode("utf-8"),
+        ContentType="text/plain",
     )
+    logger.info(f"Uploaded manifest: {object_key}.manifest")
 
 
 def load_yaml(path: str) -> dict:
@@ -132,7 +131,7 @@ def load_config_inference(yaml_path: str, cwd: str) -> dict:
     with open(yaml_path, 'r') as file:
         config = yaml.safe_load(file)
 
-        id_micro = config["devide"]["id_micro"]
+        id_micro = config["device"]["id_micro"]
 
         location_record = config["location"]["record"]
         location_place = config['location']['place']
@@ -178,7 +177,11 @@ def get_audiofiles(path):
         list: A list containing the full paths to all '.wav' files in the specified directory.
     """    
     audio_files = [file for file in os.listdir(path) if file.lower().endswith('.wav')]
-    print(f"Found {len(audio_files)} audio files in {path}")
+    
+    if len(audio_files) == 0:
+        print(f"Found 0 audio files in {path}, trying wav_files folder")
+        audio_files = [file for file in os.listdir(os.path.join(path,'wav_files')) if file.lower().endswith('.wav')]
+    
     print(f"Audio files: {audio_files}")
     return audio_files
 

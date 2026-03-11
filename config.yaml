@@ -7,7 +7,7 @@ device:
 # device location
 location:
   record: "NOISEPORT-TENERIFE"
-  place: "CONTENEDORES"
+  place: "3-Medidas"
   point: "P1_CONTENEDORES"
 
 
@@ -15,7 +15,7 @@ location:
 audio:
   format: pyaudio.paInt16
   channels: 1
-  sample_rate: 44100
+  sample_rate: 16000
   chunk_size: 11025                                       # ~1/4 second of audio if RATE=44100
   calibration_constant: -12.08
   window_size: 44100                                      # window size in samples (1 second if RATE=44100)
@@ -29,7 +29,7 @@ storage:
   output_predict_folder: "predict"
   output_predict_lt_folder: "predictions_litle"
   file_part_size: 1048576                                 # = 1024 * 1024 = 1MB
-
+  #file_part_size: 131072                                   #128KB , intento 1 de reducir el tiempo de subida
 
 #prediction / DL model settings
 prediction:

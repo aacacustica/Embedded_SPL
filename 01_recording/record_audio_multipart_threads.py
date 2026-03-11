@@ -7,6 +7,8 @@ import boto3
 import threading
 import time  
 
+
+from pathlib import Path
 from utils import *
 from logging_config import setup_logging
 from queue import Queue
@@ -18,7 +20,7 @@ import time
 import boto3
 from botocore.config import Config
 
-upload_queue = Queue()
+upload_queue = Queue(maxsize=10)  # Limitar a 10 archivos en cola para evitar saturación [TODO: ajustar]
 last_successful_upload_time = time.time()
 
 
@@ -63,123 +65,170 @@ def get_device_index(logging, target_name="stm32max98088"):
 
 
 
-
-
-
-def upload_worker(storage_s3_bucket_name, location_record, location_place, location_point,
-                  storage_output_wav_folder,file_part_size, logging):
-    global last_successful_upload_time
-    """""
-    Function to upload audio files to S3 in parts.
-    The functions logics is as follows:
-    -Read AWS Credentials ( actually not needed )
-    -Create S3 client
-    -Define PART_SIZE (1MB ,  looking forward adjusting this on config file)
-    -While True -> chop files in 1MB file parts and upload them to S3. Upload manifest when 
-    the loop ends chopping in order to keep track of file correspondance.
-
-    Later on the bucket a LAMBDA function will assemble the parts into the original file 
-    and delete the parts and the manifest
-    """""
-
+def make_s3_client():
     AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY = read_credentials()
-    PART_SIZE = file_part_size
 
     cfg = Config(
-        request_checksum_calculation=                   "when_required",
-        response_checksum_validation=                   "when_required",
-        retries=                                        {"max_attempts": 5, "mode": "standard"},
-        connect_timeout=                                5,
-        # aumenta el tiempo de lectura por si la conexión es lenta
-        read_timeout                                    =60,  
+        retries={"max_attempts": 5, "mode": "standard"},
+        connect_timeout=5,
+        read_timeout=60,
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
     )
 
-    s3 = boto3.client(
+    return boto3.client(
         "s3",
-        region_name=                                    "eu-west-1",
-        aws_access_key_id=                              AWS_ACCESS_KEY,
-        aws_secret_access_key=                          AWS_SECRET_ACCESS_KEY,
-        config=                                         cfg
+        region_name="eu-west-1",
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        config=cfg,
     )
 
-    
+
+def upload_worker(
+    s3,
+    bucket_name,
+    location_record,
+    location_place,
+    location_point,
+    storage_output_wav_folder,
+    file_part_size,
+    logger,
+):
+    global last_successful_upload_time
+    PART_SIZE = file_part_size
 
     while True:
         file_path = upload_queue.get()
         try:
             if file_path is None:
-                upload_queue.task_done()
-                break
-            #Object key -> path of the file in the LOCAL bucket
+                break # No return , ya que queremos que vaya por el finally :)
+
             object_key = (
                 f"{location_record}/{location_place}/{location_point}/"
                 f"{storage_output_wav_folder}/{os.path.basename(file_path)}"
             )
-            #Size of the file in order to make a loop through the fragments to upload
+
+            if not os.path.exists(file_path):
+                logger.warning(f"File no longer exists, skipping: {file_path}")
+                continue
+
             size = os.path.getsize(file_path)
             parts_count = (size + PART_SIZE - 1) // PART_SIZE
 
-            logging.info(
+            logger.info(
                 f"Uploading {os.path.basename(file_path)} ({size/1024/1024:.2f} MB) "
-                f"as {parts_count} chunks to s3://{storage_s3_bucket_name}/{object_key}"
+                f"as {parts_count} chunks to s3://{bucket_name}/{object_key}"
             )
 
             uploaded_parts = 0
+            idx = 0
 
-            # subir partes: object_key.part0000, object_key.part0001, ...
             with open(file_path, "rb") as f:
-                
-                idx = 0
+                uploaded_parts, idx = upload_parts(
+                    s3, f, PART_SIZE, parts_count,
+                    bucket_name, object_key, idx, uploaded_parts,
+                    logger
+                )
 
-                uploaded_parts,idx = upload_parts(s3,f,PART_SIZE,parts_count,storage_s3_bucket_name,object_key,idx,uploaded_parts)
+            upload_manifest(
+                s3, file_path, bucket_name, object_key, PART_SIZE, uploaded_parts, logger
+            )
 
-
-            # Manifest writing and uploading
-
-
-            upload_manifest(s3,file_path,storage_s3_bucket_name,object_key,PART_SIZE,uploaded_parts)
-
-
-            #Updating the last successful upload time checker
             last_successful_upload_time = time.time()
-            logging.info(f"Uploaded and queued for assembly: {object_key}")
-            logging.info(f"Removing local file: {file_path} ...")
-            # Local WAV erasing
+            logger.info(f"Uploaded and queued for assembly: {object_key}")
+
             try:
                 os.remove(file_path)
-                logging.info(f"Removed local file: {file_path}")
+                logger.info(f"Removed local file: {file_path}")
             except OSError as e:
-                logging.warning(f"Uploaded but failed to remove local file {file_path}: {e}")
+                logger.warning(f"Uploaded but failed to remove local file {file_path}: {e}")
 
         except Exception as e:
-            # si falla, intenta limpiar las partes que pudieran haberse subido
+            logger.exception(f"Failed to upload {file_path}: {e}")
+
+            # Limpieza best-effort
             try:
-                # borra manifest si existiera
-                s3.delete_object(Bucket=storage_s3_bucket_name, Key=f"{object_key}.manifest")
+                s3.delete_object(Bucket=bucket_name, Key=f"{object_key}.manifest")
             except Exception:
                 pass
-
             try:
-                # borra partes parciales si existieran
                 prefix = f"{object_key}.part"
-                resp = s3.list_objects_v2(Bucket=storage_s3_bucket_name, Prefix=prefix)
+                resp = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
                 if "Contents" in resp:
                     to_delete = [{"Key": obj["Key"]} for obj in resp["Contents"]]
-                    # S3 permite borrar en batch 1000 objetos
                     for i in range(0, len(to_delete), 1000):
-                        s3.delete_objects(Bucket=storage_s3_bucket_name, Delete={"Objects": to_delete[i:i+1000]})
+                        s3.delete_objects(Bucket=bucket_name, Delete={"Objects": to_delete[i:i+1000]})
             except Exception:
                 pass
-
-            error_message = f"Failed to upload file {file_path} to S3: {e}"
-            logging.error(error_message)
 
         finally:
             upload_queue.task_done()
 
 
 
+def upload_file_immediately(
+    file_path,
+    storage_s3_bucket_name,
+    location_record,
+    location_place,
+    location_point,
+    storage_output_wav_folder,
+    file_part_size,
+    logging
+):
+    AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY = read_credentials()
+    PART_SIZE = file_part_size
 
+    cfg = Config(
+        retries={"max_attempts": 5, "mode": "standard"},
+        connect_timeout=5,
+        read_timeout=60,
+    )
+
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-west-1",
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        config=cfg
+    )
+
+    object_key = (
+        f"{location_record}/{location_place}/{location_point}/"
+        f"{storage_output_wav_folder}/{os.path.basename(file_path)}"
+    )
+
+    size = os.path.getsize(file_path)
+    parts_count = (size + PART_SIZE - 1) // PART_SIZE
+
+    logging.info(f"Uploading immediately: {file_path} ({parts_count} parts)")
+
+    uploaded_parts = 0
+    idx = 0
+
+    with open(file_path, "rb") as f:
+        uploaded_parts, idx = upload_parts(
+            s3, f, PART_SIZE, parts_count,
+            storage_s3_bucket_name,
+            object_key,
+            idx,
+            uploaded_parts
+        )
+
+    upload_manifest(
+        s3,
+        file_path,
+        storage_s3_bucket_name,
+        object_key,
+        PART_SIZE,
+        uploaded_parts
+    )
+
+    logging.info(f"Upload finished: {object_key}")
+
+    os.remove(file_path)
+    logging.info(f"Removed local file: {file_path}")
 
 
 def record_segment(stream, p, record_seconds, location_record, location_place, location_point, audio_format, audio_channels, audio_sample_rate, audio_chunk_size, storage_s3_bucket_name, storage_output_wav_folder, logging):
@@ -192,7 +241,7 @@ def record_segment(stream, p, record_seconds, location_record, location_place, l
     
     """
     
-    home_dir = os.getenv("HOME")
+    home_dir = str(Path.home())
     frames = []
 
     # number of chunks for record_seconds
@@ -246,15 +295,25 @@ def record_audio_continuous(device_index, location_record, location_place, locat
                     input_device_index=device_index)
 
     # start background thread for uploading
-    if upload_s3 is not None:
-        logging.info("Uploading wav files to bucket S3")
+    uploader = None
+    if upload_s3:
+        s3 = make_s3_client()
         uploader = threading.Thread(
             target=upload_worker,
-            args=(storage_s3_bucket_name, location_record, location_place, location_point, storage_output_wav_folder,file_part_size, logging),
-            daemon=False
+            args=(
+                s3,
+                storage_s3_bucket_name,
+                location_record,
+                location_place,
+                location_point,
+                storage_output_wav_folder,
+                file_part_size,
+                logging,
+            ),
+            daemon=True,  # daemon True: si el proceso muere, no se queda colgado
+            name="uploader",
         )
         uploader.start()
-        logging.info("WAV FILE UPLOAD TO BUCKET S3")
         logging.info(f"Uploader thread started, alive={uploader.is_alive()}")
     else:
         logging.warning("Not uploading wav files")
@@ -273,13 +332,15 @@ def record_audio_continuous(device_index, location_record, location_place, locat
                     storage_s3_bucket_name, storage_output_wav_folder, logging
                 )
                 logging.info(f"Enqueuing {file_path} for upload...")
-                upload_queue.put(file_path)
-                time.sleep(1)
 
-                # remove the file after queuing for upload
-                #os.system(f"sudo rm -rf {file_path}")
-                #os.system(f"rm {file_path}")
-                #logging.info(f"Removed {file_path}")
+                if upload_s3:
+                    try:
+                        upload_queue.put(file_path, block=True, timeout=5)
+                        logging.info(f"Queued for upload: {file_path} (queue size={upload_queue.qsize()})")
+                    except Exception:
+                        logging.warning("Upload queue full; keeping file locally for later.")
+                else:
+                    logging.info("Upload disabled; keeping file locally.")
 
             except Exception as segment_error:
                 error_message = f"Error during segment processing: {segment_error}. Continuing to next segment."
@@ -294,11 +355,9 @@ def record_audio_continuous(device_index, location_record, location_place, locat
 
 
     finally:
-        upload_queue.put(None)
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-        logging.info("")
+        if upload_s3:
+            upload_queue.put(None)
+            upload_queue.join()  
 
 
 
@@ -339,7 +398,7 @@ def arg_parser():
 
 
 def main():
-    try:
+        
         logging = setup_logging(script_name="record_audio")
         args = arg_parser()
 
@@ -408,8 +467,8 @@ def main():
             record_seconds=                     record_seconds
         )
 
-    except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}")
+
+            
 
 
 if __name__ == "__main__":

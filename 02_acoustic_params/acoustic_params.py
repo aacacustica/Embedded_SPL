@@ -137,7 +137,7 @@ class LeqLevelOct:
                     ziC = np.ascontiguousarray(ziC, dtype=np.float32)
 
                 yA, ziA  = m.lfilter_np(self.bA, self.aA, frame, ziA)
-                yC, ziC  = m.lfilter_np(self.bC, self.aC, frame, ziC)
+                #yC, ziC  = m.lfilter_np(self.bC, self.aC, frame, ziC)
 
                 
 
@@ -147,8 +147,8 @@ class LeqLevelOct:
                 #LZ = round(get_level_db(frame, self.C), 2)
 
                 LA = round(float(m.get_level_db(yA, self.C)),2)
-                LC = round(float(m.get_level_db(yC, self.C)),2)
-                LZ = round(float(m.get_level_db(frame, self.C)),2)
+                #LC = round(float(m.get_level_db(yC, self.C)),2)
+                #LZ = round(float(m.get_level_db(frame, self.C)),2)
                 # LAmax/LAmin over FAST subchunks (8 per second if window=fs)
 
                 fast_chunk = self.window_size // 8
@@ -162,7 +162,7 @@ class LeqLevelOct:
 
                 # 1/3-oct band levels via SOS bank
                 band_levels = []
-
+                
                 for i, sos in enumerate(self.sos_bank):
                         
                     sos = np.ascontiguousarray(np.asarray(sos, dtype=np.float32), dtype=np.float32)
@@ -179,7 +179,7 @@ class LeqLevelOct:
 
                 #20db fix
                 band_levels = twenty_db_fix(band_levels)
-                
+                """
                 if any((not np.isfinite(v)) or abs(v) > 200 for v in band_levels):
                     logging.warning(
                         f"Crazy band levels in {audio_file} at {timestamp}: "
@@ -195,6 +195,17 @@ class LeqLevelOct:
                 LZ = safe_num(m.get_level_db(frame, self.C))
                 
                 row = [LA, LC, LZ, Lmax, Lmin] + band_levels + [
+                    audio_file,
+                    timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                ]
+                """
+                """
+                row = [LA, LC, LZ, Lmax, Lmin] +  [
+                    audio_file,
+                    timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                ]
+                """
+                row = [LA, Lmax, Lmin] + band_levels + [
                     audio_file,
                     timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 ]
@@ -311,7 +322,7 @@ def main():
         for subfolder in tqdm.tqdm(audiomoth_folders,desc="Processing folders ... "):
             
             logging.info(f"Processing audio files: {subfolder}...")
-            audio_path = os.path.join(subfolder, "AUDIOMOTH")
+            audio_path = os.path.join(subfolder, "AUDIOMOTH", storage_output_wav_folder)
 
             if not os.path.exists(audio_path):
                 logging.warning(f"Skipping {subfolder}, AUDIOMOTH folder not found.")
@@ -376,7 +387,7 @@ def main():
             processed_files = load_processed_files(processed_files_txt)
             valid_audio_files = [f for f in valid_audio_files if f not in processed_files]
 
-            for audio_file in tqdm.tqdm(valid_audio_files, desc="Processing audio files"):
+            for audio_file in tqdm.tqdm(valid_audio_files, desc="Processing audio files "):
                 try:
                     filepath = os.path.join(audio_path, audio_file)
                     metadata = audio_metadata.load(filepath)
@@ -419,9 +430,11 @@ def main():
                 logging.info(f"Saving data: {output_path}")
 
                 with open(output_path, "w", newline="", encoding="utf-8") as f:
+
                     w = csv.writer(f)
                     w.writerow(col_names)
                     w.writerows(flat_data_sorted)
+                    
 
                 logging.info(f"Output saved to {output_path}")
 
