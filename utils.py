@@ -44,6 +44,12 @@ def upload_parts(s3, f, PART_SIZE, parts_count, bucket, object_key, idx, uploade
 
     return uploaded_parts, idx
 
+def load_processed_files(processed_file_path):
+    """Load the set of processed filenames from a text file."""
+    if os.path.exists(processed_file_path):
+        with open(processed_file_path, "r") as f:
+            return {line.strip() for line in f if line.strip()}
+    return set()
 
 def upload_manifest(s3, file_path, bucket, object_key, PART_SIZE, uploaded_parts, logger):
     manifest_body = (
@@ -196,7 +202,29 @@ def find_audiomoth_folders(base_path: str):
         if "AUDIOMOTH" in dirs:
             yield root
 
+def get_valid_audio_files(audio_path, processed_txt_path):
+    processed_files = load_processed_files(processed_txt_path)
+    audio_files = get_audiofiles(audio_path)
 
+    if not audio_files:
+        logging.error(f"No audio files found in: {audio_path}")
+        raise FileNotFoundError(f"No audio files found in: {audio_path}")
+    
+    valid_audio_files = []
+    valid_audio_files = [f for f in audio_files if f not in processed_files]
+
+    if not valid_audio_files:
+        logging.error("Already processed all files in folder, nothing to do.")
+        raise ValueError("Already processed all files in folder, nothing to do.")
+    
+    valid_audio_files = sorted(valid_audio_files)
+
+    return valid_audio_files
+
+def update_processed_files(processed_file_path, filename):
+    """Append a processed filename to the text file."""
+    with open(processed_file_path, "a") as f:
+        f.write(filename + "\n")
 
 def get_device_id(metadata) -> str:
     artist_tags = metadata.tags.get("artist", ["songmeter"])
