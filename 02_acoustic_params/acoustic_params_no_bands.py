@@ -204,12 +204,6 @@ def parse_arguments():
         help='Calibration constant to setup for each audio device.'
     )
     parser.add_argument(
-        '-u', '--upload-S3',
-        action='store_true',
-        default=False,
-        help='If provided, upload the final CSV to S3.'
-    )
-    parser.add_argument(
         "--weighting-yaml",
         type=str,
         default=None,
@@ -227,6 +221,12 @@ def parse_arguments():
         default=None,
         help="If provided, use this fs instead of reading from metadata."
     )
+    parser.add_argument(
+        "--b",
+        type=bool,
+        default=True,
+        help="Determina si se calcularán bandas de tercios de octava o no."
+    )
     return parser.parse_args()
 
 
@@ -238,13 +238,18 @@ def main():
         logging.info("Starting process")
         home_dir = os.getenv("HOME")
 
+        # ---------------------------------------
+        # Load config info
+        # ---------------------------------------
         try:
+
             logging.info("Loading config.yaml")
             id_micro, location_record, location_place, location_point, \
             audio_sample_rate, audio_window_size, audio_calibration_constant, \
             storage_s3_bucket_name, storage_output_wav_folder, \
             storage_output_acoust_folder, calibration_constants_folder = load_config_acoustic('config.yaml')
             logging.info("Config loaded successfully")
+
         except Exception as e:
             logging.error(f"Error loading config: {e}")
             return
@@ -261,18 +266,6 @@ def main():
                 storage_output_wav_folder.strip()
             )
 
-        audio_path = os.path.abspath(os.path.normpath(audio_path))
-
-        logging.info(f"HOME raw: {repr(home_dir)}")
-        logging.info(f"Location record: {repr(location_record)}")
-        logging.info(f"Location place: {repr(location_place)}")
-        logging.info(f"Location point: {repr(location_point)}")
-        logging.info(f"Storage output wav folder: {repr(storage_output_wav_folder)}")
-        logging.info(f"Audio path: {repr(audio_path)}")
-
-        if not os.path.isdir(audio_path):
-            raise ValueError(f"Audio path does not exist: {audio_path}")
-
         output_dir = os.path.join(
             home_dir.strip(),
             location_record.strip(),
@@ -287,12 +280,27 @@ def main():
         processed_files_txt = os.path.join(output_dir, "processed_acoustic.txt")
         processed_files = load_processed_files(processed_files_txt)
 
+        audio_path = os.path.abspath(os.path.normpath(audio_path))
+
+        if not os.path.isdir(audio_path):
+            raise ValueError(f"Audio path does not exist: {audio_path}")
+    
+        logging.info(f"HOME raw: {repr(home_dir)}")
+        logging.info(f"Location record: {repr(location_record)}")
+        logging.info(f"Location place: {repr(location_place)}")
+        logging.info(f"Location point: {repr(location_point)}")
+        logging.info(f"Storage output wav folder: {repr(storage_output_wav_folder)}")
+        logging.info(f"Audio path: {repr(audio_path)}")
+
+
+
         if args.calib_const:
             calib = args.calib_const
         else:
             calib = audio_calibration_constant
 
-        upload_s3 = args.upload_S3 if args.upload_S3 else None
+
+
 
         weighting_yaml = args.weighting_yaml
         bank_yaml = args.bank_yaml
@@ -309,7 +317,6 @@ def main():
         logging.info(f"Processed file list path: {processed_files_txt}")
         logging.info(f"Processed file list exists: {os.path.exists(processed_files_txt)}")
         logging.info(f"Loaded {len(processed_files)} processed filenames")
-        logging.info(f"Upload to bucket S3: {upload_s3}")
         logging.info(f"Calibration constant: {calib}")
         logging.info(f"Using weighting YAML: {weighting_yaml}")
         logging.info(f"Using bank YAML: {bank_yaml}")
@@ -322,23 +329,20 @@ def main():
         sample_rates = []
         valid_audio_files = []
         
-        logging.info("Reading metadata...")
+        logging.info("Checking on already processed audio files ... ")
         for file in tqdm.tqdm(audio_files, desc="Reading metadata"):
             try:
-                #metadata = audio_metadata.load(os.path.join(audio_path, file))
-                #sample_rates.append(metadata.streaminfo.sample_rate)
-                valid_audio_files.append(file)
+                if file not in processed_files:
+                    valid_audio_files.append(file)
             except Exception as e:
                 logging.warning(f"Error reading file metadata: {file}, {e}")
-        #- Se omite la lectura de metadata para acelerar el proceso, se asume que todos los archivos tienen el mismo fs o se especifica con --fs """
+
         if not valid_audio_files:
             logging.warning("No valid audio files to process.")
             return
 
-        logging.info(f"Valid audio files before filtering: {len(valid_audio_files)}")
-        valid_audio_files = [f for f in valid_audio_files if f not in processed_files]
         valid_audio_files = sorted(valid_audio_files)
-        logging.info(f"Valid audio files after filtering: {len(valid_audio_files)}")
+
 
         if not valid_audio_files:
             logging.info("No new audio files to process.")
