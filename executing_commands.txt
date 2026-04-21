@@ -1,0 +1,10 @@
+python3 -m 01_recording.record_audio -t 60 -u
+
+python3 -m 02_acoustic_params.acoustic_params -u
+
+python3 -m 03_inference.inference_tflite -u -w 3
+
+python3 -m 04_remove.remove_files
+
+python3 -m 03_inference.inference -u -w 2
+
