@@ -50,15 +50,16 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
     # ---------------------------
     # INIZIALATIN PROCESSING FILE
     # ---------------------------
+    
     processed_files_txt = os.path.join(path, "processed_predictions.txt")
     processed_files_txt = processed_files_txt.replace("wav_files", "predictions_litle")
     logging.info(f"Saving the processed file txt here --> {processed_files_txt}")
-    
     processed_files = load_processed_files(processed_files_txt)
     
     # --------------------------------------------------------
     # 1) create the TFLite interpreter
     # --------------------------------------------------------
+
     logging.info("Setting the TF Model and loading the classes")
     
     if model_path is not None:
@@ -133,9 +134,6 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
             # --------------------------------------------------------
             logging.info("")
 
-
-
-
             # --------------------------------------------------------
             # 3 prepare waveform input (0.975s @ 16kHz => 15600 samples)
             # Decode the WAV file
@@ -192,8 +190,9 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
                     prediction = np.mean(scores, axis=0)
 
                     top_i,top_prediction = filter_predictions(prediction,threshold)
+                    
                     if top_i is not None:
-                        top_class = yamnet_classes[top_i][0]
+                        top_class = yamnet_classes[top_i]
                         top_prediction = f"{top_prediction:.4f}"
                     else:
                         top_class = []
@@ -235,6 +234,7 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
                     t_inf_start = time.perf_counter()
 
                     for start_idx in range(0, len(waveform), target_len):
+
                         end_idx = min(start_idx + target_len, len(waveform))
                         valid_len = end_idx - start_idx
 
@@ -249,7 +249,7 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
 
                         top_i, top_prediction = filter_predictions(prediction, threshold)
                         if top_i is not None:
-                            top_class = yamnet_classes[top_i][0]
+                            top_class = yamnet_classes[top_i]
                             top_prediction = f"{top_prediction:.4f}"
                         else:
                             top_class = []
@@ -288,7 +288,7 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
 
             
             # ----------------------------
-            # MARKING FILE AS PROICESSED
+            # MARKING FILE AS PROCESSED
             # ----------------------------
             update_processed_files(processed_files_txt, audio_file)
             processed_files.add(audio_file)
@@ -414,7 +414,6 @@ def main():
         else:
             upload_s3 = None
         
-
         if args.step:
             step = args.step
         else:
@@ -433,10 +432,11 @@ def main():
 
 
     try:
+
         audio_files = sorted([f for f in os.listdir(path) if f.lower().endswith('.wav')])
         audio_files = audio_files[::step]  # Process every nth file based on the specified range given in the arguments
-
         full_paths = [os.path.join(path, file) for file in audio_files]
+
     except Exception as e:
         logging.error(f"Error getting the audio files: {e}")
         return

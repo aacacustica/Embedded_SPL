@@ -1,7 +1,6 @@
 import os
 import sys
 
-# Obtener la ruta absoluta de la carpeta raiz
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 # Carpeta deps
@@ -50,8 +49,7 @@ class LeqLevelOct:
         self.bC = np.asarray(w["C_weighting"]["b"], dtype=np.float32)
         self.aC = np.asarray(w["C_weighting"]["a"], dtype=np.float32)
 
-        # Load 1/3-oct SOS bank (se mantiene la carga por compatibilidad,
-        # pero ya no se usan las bandas en la salida)
+        # Load 1/3-oct SOS bank 
         b = load_yaml(bank_yaml_path)
         if int(b["fs"]) != self.fs:
             raise ValueError(f"Bank YAML fs={b['fs']} does not match fs={self.fs}")
@@ -253,8 +251,8 @@ def parse_arguments():
     parser.add_argument(
         "-b", "--bands",
         type=bool,
-        default=True,
-        help="Determina si se calcularán bandas de tercios de octava o no."
+        default=False,
+        help="Determina si se calcularan bandas de tercios de octava o no."
     )
     return parser.parse_args()
 
@@ -301,7 +299,7 @@ def main():
             audio_path = os.path.abspath(os.path.normpath(audio_path))
 
         # ---------------------------------------
-        # Setup output dir,trackeo de archivos procesados, carga de constantes de calibración
+        # Setup output dir,trackeo de archivos procesados, carga de constantes de calibracion
         # ---------------------------------------
         output_dir = os.path.join(
             home_dir.strip(),
