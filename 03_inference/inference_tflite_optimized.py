@@ -50,16 +50,15 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
     # ---------------------------
     # INIZIALATIN PROCESSING FILE
     # ---------------------------
-    
     processed_files_txt = os.path.join(path, "processed_predictions.txt")
     processed_files_txt = processed_files_txt.replace("wav_files", "predictions_litle")
     logging.info(f"Saving the processed file txt here --> {processed_files_txt}")
+    
     processed_files = load_processed_files(processed_files_txt)
     
     # --------------------------------------------------------
     # 1) create the TFLite interpreter
     # --------------------------------------------------------
-
     logging.info("Setting the TF Model and loading the classes")
     
     if model_path is not None:
@@ -288,7 +287,7 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
 
             
             # ----------------------------
-            # MARKING FILE AS PROCESSED
+            # MARKING FILE AS PROICESSED
             # ----------------------------
             update_processed_files(processed_files_txt, audio_file)
             processed_files.add(audio_file)
@@ -432,11 +431,10 @@ def main():
 
 
     try:
-
         audio_files = sorted([f for f in os.listdir(path) if f.lower().endswith('.wav')])
         audio_files = audio_files[::step]  # Process every nth file based on the specified range given in the arguments
-        full_paths = [os.path.join(path, file) for file in audio_files]
 
+        full_paths = [os.path.join(path, file) for file in audio_files]
     except Exception as e:
         logging.error(f"Error getting the audio files: {e}")
         return

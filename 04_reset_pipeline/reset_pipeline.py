@@ -4,7 +4,7 @@ import os
 ACOUSTIC_WAVS_PATH = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/wav_files"
 INFERENCES_WAVS_PATH = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/wav_files"
 INFERENCES_PROCESSED_PATH = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/predictions_litle/processed_predictions.txt"
-ACOUSTICS_PROCESSED_PATH = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/acoustic_params/processed_acoustics.txt"
+ACOUSTICS_PROCESSED_PATH = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/acoustic_params/processed_acoustic.txt"
 
 """
 Formato de los archivos .wav : YYYYMMDD_HHMMSS.wav
