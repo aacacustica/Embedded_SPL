@@ -1,5 +1,6 @@
 #!/bin/sh
 
+SENSOR_NAME=$(hostname)
 SERVER_BASE="http://100.120.228.23:8080/upload"
 PROXY="http://127.0.0.1:1055"
 
@@ -20,6 +21,10 @@ with open(fpath, "rb") as fh:
     data = fh.read()
 
 req = urllib.request.Request(url, data=data, method="POST")
+
+# Añadir header más fiable
+req.add_header("X-Filename", base)
+
 opener = urllib.request.build_opener(
     urllib.request.ProxyHandler({"http": proxy, "https": proxy})
 )
@@ -37,7 +42,15 @@ send_dir() {
     for f in "$DIR"/*.csv
     do
         [ -f "$f" ] || continue
-        if send_file "$f" "$SUBPATH"; then
+
+        base=$(basename "$f")
+
+        # Extraer fecha automáticamente 
+        fecha=$(echo "$base" | grep -oE '[0-9]{8}' | head -n1)
+
+        destino="inbox/${SENSOR_NAME}/${SUBPATH}/${fecha}"
+
+        if send_file "$f" "$destino"; then
             rm "$f"
         else
             echo "Error sending $f" >&2
@@ -48,5 +61,6 @@ send_dir() {
 send_dir "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/acoustic_params" "acoustics"
 send_dir "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/predictions_litle" "predictions"
 
+# Opcional: envío de un wav aleatorio
 #wav_random=$(find /root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/wav_files -type f -name '*.wav' | shuf -n 1)
 #[ -n "$wav_random" ] && send_file "$wav_random" "wav"

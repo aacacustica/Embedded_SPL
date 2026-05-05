@@ -274,13 +274,11 @@ def inference(path,id_micro,file_list, model_path, sample_rate, chunk_size, wind
             # -----------------------------------------------------------
             # save csv
             # -----------------------------------------------------------
+            
             with open(csv_full_path, mode="w", newline="") as final_csv:
                 writer = csv.writer(final_csv)
                 writer.writerows(csv_data)
             logging.info(f"Final CSV file saved at {csv_full_path}")
-
-            # df = pd.read_csv(csv_full_path)
-
 
             # -------------------
             # UPLOAD TO BUCKET S3
