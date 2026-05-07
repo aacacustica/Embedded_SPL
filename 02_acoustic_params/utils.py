@@ -6,6 +6,9 @@ import csv
 import boto3
 import configparser
 import datetime
+import soxr
+import numpy as np
+import soundfile as sf
 
 import leq_levels_oct_weighting_C as m
 # Constantes de inicializacion
@@ -19,8 +22,48 @@ T = 1
 # REGULAR FUNCTIONS
 # -----------------------------------
 
+def read_audio(self,audio_file):
+    x, fs_read = sf.read(os.path.join(self.audio_path, audio_file))
+    if x.ndim > 1:
+        x = x[:, 0]
+    x = np.asarray(x, dtype=np.float32).ravel()
 
+    if len(x) < self.window_size:
+        logging.warning(f"Skipping {audio_file}: shorter than one window.")
+        return None
+    return x, fs_read
 
+def resample_audio(self,audio_file, fs_read, x):
+        
+    logging.warning(
+        f"File {audio_file} has fs={fs_read} but expected {self.fs}. "
+        "Resampling audio file"
+    )
+    x = soxr.resample(
+        x,
+        in_rate=fs_read,
+        out_rate=self.fs
+    ).astype(np.float32, copy=False)
+    logging.info(f"Resampled file {audio_file} into fs={self.fs}")
+    logging.info(
+        f"{audio_file}: fs_read={fs_read}, target_fs={self.fs}, "
+        f"window_size={self.window_size}, "
+        f"duration_after={len(x)/self.fs:.2f}s, "
+        f"frames={(len(x)-self.window_size)//self.window_size+1}"
+    )
+
+    return x, fs_read
+
+def get_timestamps(self,x, audio_file):
+    name_split = os.path.splitext(audio_file)[0]
+    start_timestamp = datetime.datetime.strptime(name_split, "%Y%m%d_%H%M%S")
+
+    frame_starts = range(0, len(x) - self.window_size + 1, self.window_size)
+    timestamps = [
+        start_timestamp + datetime.timedelta(seconds=fstart / self.fs)
+        for fstart in frame_starts
+    ]
+    return timestamps,frame_starts
 def upload_parts(s3, f, PART_SIZE, parts_count, bucket, object_key, idx, uploaded_parts, logger):
     while True:
         chunk = f.read(PART_SIZE)
