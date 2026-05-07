@@ -22,7 +22,7 @@ with open(fpath, "rb") as fh:
 
 req = urllib.request.Request(url, data=data, method="POST")
 
-# Añadir header más fiable
+# Añadir header mas fiable
 req.add_header("X-Filename", base)
 
 opener = urllib.request.build_opener(
@@ -48,7 +48,7 @@ send_dir() {
         # Extraer fecha automáticamente 
         fecha=$(echo "$base" | grep -oE '[0-9]{8}' | head -n1)
 
-        destino="inbox/${SENSOR_NAME}/${SUBPATH}/${fecha}"
+        destino="/${SENSOR_NAME}/${SUBPATH}/${fecha}"
 
         if send_file "$f" "$destino"; then
             rm "$f"
