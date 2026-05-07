@@ -192,7 +192,8 @@ class LeqLevelOct:
                 else:
                     row = [LA, LC, LZ, Lmax, Lmin,
                         audio_file,
-                        timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]]
+                        timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                        ]
 
                 db.append(row)
 
