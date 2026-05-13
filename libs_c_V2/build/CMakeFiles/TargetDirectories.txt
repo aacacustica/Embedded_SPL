@@ -1,0 +1,3 @@
+/work/build/CMakeFiles/leq_levels_oct_weighting_C.dir
+/work/build/CMakeFiles/edit_cache.dir
+/work/build/CMakeFiles/rebuild_cache.dir

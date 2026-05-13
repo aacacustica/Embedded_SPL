@@ -50,6 +50,7 @@ class LeqLevelOct:
         self.aC = np.asarray(w["C_weighting"]["a"], dtype=np.float32)
 
         # Load 1/3-oct SOS bank 
+
         b = load_yaml(bank_yaml_path)
         if int(b["fs"]) != self.fs:
             raise ValueError(f"Bank YAML fs={b['fs']} does not match fs={self.fs}")

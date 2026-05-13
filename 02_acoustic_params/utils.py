@@ -22,15 +22,14 @@ T = 1
 # REGULAR FUNCTIONS
 # -----------------------------------
 
-def read_audio(self,audio_file):
-    x, fs_read = sf.read(os.path.join(self.audio_path, audio_file))
+def read_audio(filepath):
+    x, fs_read = sf.read(filepath)
+
     if x.ndim > 1:
         x = x[:, 0]
+
     x = np.asarray(x, dtype=np.float32).ravel()
 
-    if len(x) < self.window_size:
-        logging.warning(f"Skipping {audio_file}: shorter than one window.")
-        return None
     return x, fs_read
 
 def resample_audio(self,audio_file, fs_read, x):

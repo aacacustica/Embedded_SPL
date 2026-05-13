@@ -39,29 +39,29 @@ class LeqLevelOct:
         self.window_size = int(window_size)
         self.audio_path = audio_path
 
-        # A and C weighting filters
         w = load_yaml(weighting_yaml_path)
+
         if int(w["fs"]) != self.fs:
             raise ValueError(f"Weighting YAML fs={w['fs']} does not match fs={self.fs}")
 
-        self.bA = np.asarray(w["A_weighting"]["b"], dtype=np.float32)
-        self.aA = np.asarray(w["A_weighting"]["a"], dtype=np.float32)
-        self.bC = np.asarray(w["C_weighting"]["b"], dtype=np.float32)
-        self.aC = np.asarray(w["C_weighting"]["a"], dtype=np.float32)
+        self.bA = np.asarray(w["A_weighting"]["b"], dtype=float)
+        self.aA = np.asarray(w["A_weighting"]["a"], dtype=float)
+        self.bC = np.asarray(w["C_weighting"]["b"], dtype=float)
+        self.aC = np.asarray(w["C_weighting"]["a"], dtype=float)
 
-        # Load 1/3-oct SOS bank 
         b = load_yaml(bank_yaml_path)
         if int(b["fs"]) != self.fs:
             raise ValueError(f"Bank YAML fs={b['fs']} does not match fs={self.fs}")
 
-        self.sos_bank = b["sos_bank"]
+        self.sos_bank = np.asarray(b["sos_bank"], dtype=float)
         self.center_freqs = b["freq_center"]
 
-        self.logging = logging
-        logging.info("Initializing LeqLevelOct")
-        logging.info(
-            f"with fs={fs}, C={calibration_constant}, "
-            f"window_size={window_size}, audio_path={audio_path}"
+        self.processor = m.AcousticProcessor(
+            np.ascontiguousarray(self.bA, dtype=float),
+            np.ascontiguousarray(self.aA, dtype=float),
+            np.ascontiguousarray(self.bC, dtype=float),
+            np.ascontiguousarray(self.aC, dtype=float),
+            np.ascontiguousarray(self.sos_bank, dtype=float),
         )
 
     def process_audio_files(self,x, audio_file, mode="no_bands"):
@@ -73,33 +73,58 @@ class LeqLevelOct:
 
         if mode == "bands":
 
-            col_names = ["LA", "LC", "LZ", "LAmax", "LAmin"] + \
-                        [f"{f:.2f}Hz" for f in self.center_freqs] + \
-                        ["filename", "date"]
+            col_names = (
+                ["LA", "LC", "LZ", "LAmax", "LAmin"]
+                + [f"{f:.2f}Hz" for f in self.center_freqs]
+                + ["filename", "date"]
+            )
+            compute_bands = True
             
         elif mode == "no_bands":
 
             col_names = ["LA", "LC", "LZ", "LAmax", "LAmin", "filename", "date"]
+            compute_bands = False
 
         else:
 
             raise ValueError(f"Unsupported mode: {mode}")
+        if len(x) < self.window_size:
+            logging.warning(f"Skipping {audio_file}: shorter than one window.")
+            return [], col_names
 
-        all_data = []
+        levels = self.processor.process(
+            x,
+            self.window_size,
+            float(self.C),
+            compute_bands,
+        )
 
+        name_split = os.path.splitext(audio_file)[0]
+        start_timestamp = datetime.datetime.strptime(
+            name_split,
+            "%Y%m%d_%H%M%S"
+        )
 
+        rows = []
 
+        for frame_idx, values in enumerate(levels):
+            timestamp = start_timestamp + datetime.timedelta(
+                seconds=(frame_idx * self.window_size) / self.fs
+            )
 
+            numeric_values = [
+                round(float(v), 2) if np.isfinite(v) else ""
+                for v in values
+            ]
 
-        if db:
-            all_data.append(db)
-            logging.info(f"Processed file: {audio_file} (rows={len(db)})")
-        else:
-            logging.warning(f"Processed file: {audio_file} produced 0 rows (no frames).")
+            row = numeric_values + [
+                audio_file,
+                timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            ]
 
-        logging.info(f"Processed file: {audio_file}")
+            rows.append(row)
 
-        return all_data, col_names
+        return [rows], col_names
 
 
 
@@ -145,9 +170,8 @@ def parse_arguments():
     )
     parser.add_argument(
         "-b", "--bands",
-        type=bool,
-        default=False,
-        help="Determina si se calcularan bandas de tercios de octava o no."
+        action="store_true",
+        help="Calcula bandas de tercios de octava."
     )
     return parser.parse_args()
 
@@ -275,27 +299,27 @@ def main():
             for audio_file in tqdm.tqdm(valid_audio_files, desc="Processing audio files"):
                 try:
                     
-                    filepath = os.path.join(audio_path, audio_file)
-                    metadata = audio_metadata.load(filepath)
-                    device_id = get_device_id(metadata)
-                    C = calibration_constants.get(device_id, float(calib))
-                    calculator.C = C
-
-
                     #---------------------------
-                    # Check file extension
+                    # Check valid format
                     #---------------------------
 
                     if not audio_file.lower().endswith(".wav"):
                         logging.warning(f"Skipping non-wav file: {audio_file}")
                         continue
 
+                    filepath = os.path.join(audio_path, audio_file)
+
+                    metadata = audio_metadata.load(filepath)
+                    device_id = get_device_id(metadata)
+                    C = calibration_constants.get(device_id, float(calib))
+                    calculator.C = C
+
                     #---------------------------
                     # Read audio file
                     #---------------------------
 
                     try:
-                        x, fs_read = read_audio(audio_file)
+                        x, fs_read = read_audio(filepath)
                         if x is None:
                             continue  
                     except Exception as e:
@@ -314,14 +338,14 @@ def main():
                             continue
 
                     #---------------------------
-                    # Calculate timestamps for each frame and init variables
+                    # Call processor and calculate
                     #---------------------------
 
-                    timestamps,frame_starts = get_timestamps(calculator, x, audio_file)
-
-
-                    file_data, col_names = calculator.process_audio_files(x,[audio_file], mode=mode)
-                    #file_data, col_names = m.process_audio_block(x,config,state)
+                    file_data, col_names = calculator.process_audio_files(
+                        x,
+                        audio_file,
+                        mode=mode,
+                    )
                     if not csv_initialized:
                         writer.writerow(col_names)
                         csv_initialized = True
