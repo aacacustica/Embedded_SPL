@@ -1,5 +1,13 @@
-import os
+import time
+_SCRIPT_T0 = time.perf_counter()
+
+def boot_timing(label):
+    now = time.perf_counter()
+    print(f"[BOOT_TIMING] {label}: {now - _SCRIPT_T0:.3f}s", flush=True)
+
+
 import sys
+import os
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -9,20 +17,29 @@ DEPS_DIR = os.path.join(BASE_DIR, 'deps')
 sys.path.insert(0, DEPS_DIR)
 
 import csv
+boot_timing("import csv")
+
 import datetime
-import soxr
+boot_timing("import datetime")
+
 import argparse
+boot_timing("argparse")
+
 import leq_levels_oct_weighting_C as m
+boot_timing("import leq_leves")
 
-import tqdm
-import audio_metadata
 
-import soundfile as sf
+#import audio_metadata
+#boot_timing("audio_metadata")
+
 import numpy as np
+boot_timing("import numpy")
 
-from utils import *
+from utils import load_yaml,load_config_acoustic,read_calibration_constants,get_valid_audio_files,read_audio,resample_audio,get_device_id,update_processed_files
+boot_timing("import util functions")
+
 from logging_config import setup_logging
-
+boot_timing("logging_config")
 
 class LeqLevelOct:
     def __init__(
@@ -173,6 +190,11 @@ def parse_arguments():
         action="store_true",
         help="Calcula bandas de tercios de octava."
     )
+    parser.add_argument(
+        "-d","--debug",
+        action="store_true",
+        help="Activa el modo debug"
+    )
     return parser.parse_args()
 
 
@@ -186,17 +208,46 @@ def main():
         # Load config info
         # ---------------------------------------
         try:
+            t0_config = time.perf_counter()
 
-            logging.info("Loading config.yaml")
+            if debug : logging.info("Loading config.yaml")
             id_micro, location_record, location_place, location_point, \
             audio_sample_rate, audio_window_size, audio_calibration_constant, \
             storage_s3_bucket_name, storage_output_wav_folder, \
             storage_output_acoust_folder, calibration_constants_folder = load_config_acoustic('config.yaml')
-            logging.info("Config loaded successfully")
+            if debug : logging.info("Config loaded successfully")
 
+            t1_config = time.perf_counter()
+        
         except Exception as e:
             logging.error(f"Error loading config: {e}")
             return
+
+        
+        
+        
+
+        # ---------------------------------------
+        # Parseo de argumentos
+        # ---------------------------------------
+        if args.calib_const: calib = args.calib_const
+        else: calib = audio_calibration_constant
+            
+        if args.fs: fs = args.fs
+        else: fs = audio_sample_rate
+            
+        if args.weighting_yaml:  weighting_yaml = args.weighting_yaml
+        else: raise FileNotFoundError(f"Missing weighting YAML: {weighting_yaml}")
+            
+        if args.bank_yaml: bank_yaml = args.bank_yaml 
+        else: raise FileNotFoundError(f"Missing bank YAML: {bank_yaml}")
+        
+        if args.bands: mode= "bands"
+        else: mode = "no_bands"
+
+        if args.debug: debug = True
+        else: debug = False
+
 
         # ---------------------------------------
         # Load wav dir path 
@@ -232,31 +283,21 @@ def main():
         output_dir = os.path.abspath(os.path.normpath(output_dir))
         os.makedirs(output_dir, exist_ok=True)
         processed_files_txt = os.path.join(output_dir, "processed_acoustic.txt")
-        calibration_constants = read_calibration_constants(calibration_constants_folder)
-        valid_audio_files = get_valid_audio_files(audio_path, processed_files_txt)
 
-        # ---------------------------------------
-        # Parseo del resto de argumentos
-        # ---------------------------------------
-        if args.calib_const: calib = args.calib_const
-        else: calib = audio_calibration_constant
-            
-        if args.fs: fs = args.fs
-        else: fs = audio_sample_rate
-            
-        if args.weighting_yaml:  weighting_yaml = args.weighting_yaml
-        else: raise FileNotFoundError(f"Missing weighting YAML: {weighting_yaml}")
-            
-        if args.bank_yaml: bank_yaml = args.bank_yaml 
-        else: raise FileNotFoundError(f"Missing bank YAML: {bank_yaml}")
-        
-        if args.bands: mode = "bands"
-        else: mode = "no_bands"
+        t0_calibration = time.perf_counter()
+        calibration_constants = read_calibration_constants(calibration_constants_folder)
+        t1_calibration = time.perf_counter()
+
+        t0_valid_files = time.perf_counter()
+        valid_audio_files = get_valid_audio_files(audio_path, processed_files_txt)
+        t1_valid_files = time.perf_counter()
+
+
 
         # ---------------------------------------
         # Creacion de objeto calculadora
         # ---------------------------------------
-
+        t0_calculator = time.perf_counter()
         calculator = LeqLevelOct(
             fs=fs,
             calibration_constant=float(calib),
@@ -265,6 +306,7 @@ def main():
             weighting_yaml_path=weighting_yaml,
             bank_yaml_path=bank_yaml,
         )
+        t1_calculator = time.perf_counter()
 
         timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         output_filename = f"leq_oct_P1_TEST_sos_weighting_{timestamp_str}.csv"
@@ -274,31 +316,34 @@ def main():
         rows_written = 0
         csv_initialized = False
 
-        logging.info(f"HOME raw: {repr(home_dir)}")
-        logging.info(f"Location record: {repr(location_record)}")
-        logging.info(f"Location place: {repr(location_place)}")
-        logging.info(f"Location point: {repr(location_point)}")
-        logging.info(f"Storage output wav folder: {repr(storage_output_wav_folder)}")
-        logging.info(f"Audio path: {repr(audio_path)}")
+        if debug : 
+            logging.info(f"HOME raw: {repr(home_dir)}")
+            logging.info(f"Location record: {repr(location_record)}")
+            logging.info(f"Location place: {repr(location_place)}")
+            logging.info(f"Location point: {repr(location_point)}")
+            logging.info(f"Storage output wav folder: {repr(storage_output_wav_folder)}")
+            logging.info(f"Audio path: {repr(audio_path)}")
 
-        logging.info(f"Audio path: {audio_path}")
-        logging.info(f"Output dir: {output_dir}")
-        logging.info(f"Processed file list path: {processed_files_txt}")
-        logging.info(f"Processed file list exists: {os.path.exists(processed_files_txt)}")
-        logging.info(f"Calibration constant: {calib}")
-        logging.info(f"Using weighting YAML: {weighting_yaml}")
-        logging.info(f"Using bank YAML: {bank_yaml}")
+            logging.info(f"Audio path: {audio_path}")
+            logging.info(f"Output dir: {output_dir}")
+            logging.info(f"Processed file list path: {processed_files_txt}")
+            logging.info(f"Processed file list exists: {os.path.exists(processed_files_txt)}")
+            logging.info(f"Calibration constant: {calib}")
+            logging.info(f"Using weighting YAML: {weighting_yaml}")
+            logging.info(f"Using bank YAML: {bank_yaml}")
 
-        logging.info(f"Using sample rate: {fs}")
-        logging.info(f"Saving data to: {output_path}")
-        logging.info(f"Processing {len(valid_audio_files)} new audio files...")
+            logging.info(f"Using sample rate: {fs}")
+            logging.info(f"Saving data to: {output_path}")
+            logging.info(f"Processing {len(valid_audio_files)} new audio files...")
 
         with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
 
-            for audio_file in tqdm.tqdm(valid_audio_files, desc="Processing audio files"):
+            for audio_file in valid_audio_files:
                 try:
+
                     
+
                     #---------------------------
                     # Check valid format
                     #---------------------------
@@ -308,10 +353,20 @@ def main():
                         continue
 
                     filepath = os.path.join(audio_path, audio_file)
-
-                    metadata = audio_metadata.load(filepath)
-                    device_id = get_device_id(metadata)
+                    
+                    t0_metadata = time.perf_counter()
+                    #metadata = audio_metadata.load(filepath)
+                    t1_metadata = time.perf_counter()
+                    
+                    t0_device = time.perf_counter()
+                    #device_id = get_device_id(metadata)
+                    device_id = "songmeter"
+                    logging.info(f"Device id: {device_id}")
+                    t1_device = time.perf_counter()
+                    
+                    t0_calibration_read = time.perf_counter()
                     C = calibration_constants.get(device_id, float(calib))
+                    t1_calibration_read = time.perf_counter()
                     calculator.C = C
 
                     #---------------------------
@@ -319,7 +374,9 @@ def main():
                     #---------------------------
 
                     try:
+                        t0_read = time.perf_counter()
                         x, fs_read = read_audio(filepath)
+                        t1_read = time.perf_counter()
                         if x is None:
                             continue  
                     except Exception as e:
@@ -332,7 +389,11 @@ def main():
 
                     if fs_read != calculator.fs:
                         try:
+
+                            t0_resample = time.perf_counter()
                             x,fs_read = resample_audio(calculator, audio_file, fs_read, x)
+                            t1_resample = time.perf_counter()
+
                         except Exception as e:
                             logging.warning(f"Error resampling {audio_file}: {e}")
                             continue
@@ -340,25 +401,29 @@ def main():
                     #---------------------------
                     # Call processor and calculate
                     #---------------------------
-
+                    t0_process = time.perf_counter()
                     file_data, col_names = calculator.process_audio_files(
                         x,
                         audio_file,
                         mode=mode,
                     )
+                    t1_process = time.perf_counter()
+
                     if not csv_initialized:
                         writer.writerow(col_names)
                         csv_initialized = True
 
+                    t0_writing = time.perf_counter()
                     file_rows_written = 0
                     for file_rows in file_data:
                         writer.writerows(file_rows)
                         file_rows_written += len(file_rows)
+                    t1_writing = time.perf_counter()
 
                     if file_rows_written > 0:
                         rows_written += file_rows_written
                         update_processed_files(processed_files_txt, audio_file)
-                        logging.info(f"Marked as processed: {audio_file}")
+                        if debug : logging.info(f"Marked as processed: {audio_file}")
                     else:
                         logging.warning(
                             f"No usable data produced for {audio_file}; "
@@ -370,8 +435,24 @@ def main():
                         f"with device_id={device_id}, C={C}, fs={fs}, "
                         f"rows={file_rows_written}"
                     )
+
+                    if debug : logging.info(f"TIMING read_audio = {t1_read - t0_read}")
+                    if debug : logging.info(f"TIMING resample = {t1_resample - t0_resample}")
+                    if debug : logging.info(f"TIMING cpp_process = {t1_process - t0_process}")
+                    if debug : logging.info(f"TIMING csv_write = {t1_writing - t0_writing}")
+                    if debug : logging.info(f"TIMING reading metadata = {t1_metadata - t0_metadata}")
+                    if debug : logging.info(f"TIMING reading device = {t1_device - t0_device}")
+                    if debug : logging.info(f"TIMING reading calibration = {t1_calibration_read - t0_calibration_read}")
+
                 except Exception as e:
                     logging.warning(f"Error processing file: {audio_file}, {e}")
+
+
+
+        if debug : logging.info(f"TIMING reading config = {t1_config - t0_config}")
+        if debug : logging.info(f"TIMING making calibration = {t1_calibration - t0_calibration}")
+        if debug : logging.info(f"TIMING reading valid files = {t1_valid_files - t0_valid_files}")
+        if debug : logging.info(f"TIMING creatin calculator = {t1_calculator - t0_calculator}")
 
         if rows_written == 0:
             logging.warning("No data to save.")
@@ -392,6 +473,7 @@ def main():
         logging.error(f"An unexpected error occurred: {e}")
 
 
-
+boot_timing("before main")
 if __name__ == "__main__":
     main()
+boot_timing("after main")

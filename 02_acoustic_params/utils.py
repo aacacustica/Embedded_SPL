@@ -1,14 +1,12 @@
 import os
-import subprocess
 import logging
 import yaml
 import csv
 import boto3
 import configparser
 import datetime
-import soxr
-import numpy as np
-import soundfile as sf
+
+
 
 import leq_levels_oct_weighting_C as m
 # Constantes de inicializacion
@@ -23,6 +21,10 @@ T = 1
 # -----------------------------------
 
 def read_audio(filepath):
+    
+    import soundfile as sf
+    import numpy as np
+    
     x, fs_read = sf.read(filepath)
 
     if x.ndim > 1:
@@ -33,7 +35,10 @@ def read_audio(filepath):
     return x, fs_read
 
 def resample_audio(self,audio_file, fs_read, x):
-        
+    
+    import numpy as np
+    import soxr
+
     logging.warning(
         f"File {audio_file} has fs={fs_read} but expected {self.fs}. "
         "Resampling audio file"

@@ -13,7 +13,7 @@
 
 static inline float level_from_sum_sq(double sum_sq, int n, float C)
 {
-    constexpr double P_REF = 20e-6;
+    constexpr double P_REF = 20e-6; /* anterior valor 2e-6f */
     constexpr double EPS_MS = 1e-30;
 
     /*
