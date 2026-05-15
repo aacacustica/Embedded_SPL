@@ -210,12 +210,12 @@ def main():
         try:
             t0_config = time.perf_counter()
 
-            if debug : logging.info("Loading config.yaml")
+            
             id_micro, location_record, location_place, location_point, \
             audio_sample_rate, audio_window_size, audio_calibration_constant, \
             storage_s3_bucket_name, storage_output_wav_folder, \
             storage_output_acoust_folder, calibration_constants_folder = load_config_acoustic('config.yaml')
-            if debug : logging.info("Config loaded successfully")
+          
 
             t1_config = time.perf_counter()
         
@@ -342,7 +342,7 @@ def main():
             for audio_file in valid_audio_files:
                 try:
 
-                    
+                    t0_audio_process = time.perf_counter()
 
                     #---------------------------
                     # Check valid format
@@ -436,6 +436,8 @@ def main():
                         f"rows={file_rows_written}"
                     )
 
+                    t1_audio_process = time.perf_counter()
+                    
                     if debug : logging.info(f"TIMING read_audio = {t1_read - t0_read}")
                     if debug : logging.info(f"TIMING resample = {t1_resample - t0_resample}")
                     if debug : logging.info(f"TIMING cpp_process = {t1_process - t0_process}")
@@ -443,6 +445,8 @@ def main():
                     if debug : logging.info(f"TIMING reading metadata = {t1_metadata - t0_metadata}")
                     if debug : logging.info(f"TIMING reading device = {t1_device - t0_device}")
                     if debug : logging.info(f"TIMING reading calibration = {t1_calibration_read - t0_calibration_read}")
+                    if debug : logging.info(f"")
+                    if debug : logging.info(f"TIMING per audio processing : {t1_audio_process - t0_audio_process}")
 
                 except Exception as e:
                     logging.warning(f"Error processing file: {audio_file}, {e}")

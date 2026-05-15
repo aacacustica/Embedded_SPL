@@ -16,7 +16,7 @@ import tflite_runtime.interpreter as tflite
 
 import warnings
 
-from utils import *
+from utils import load_config_inference, class_names_csv, upload_file_to_s3
 from logging_config import setup_logging
 
 
@@ -27,9 +27,15 @@ warnings.filterwarnings("ignore",
                         )
 
 
+def filter_predictions(predictions,threshold):
+    top_i = int(np.argmax(predictions))
+    top_pred = float(predictions[top_i])
+    if top_pred > threshold:
+        return top_i, top_pred
+    return None, None
 
-
-def inference(path,id_micro,file_list, model_path, sample_rate, chunk_size, window_size, threshold, upload_s3, logging, output_wav_folder, output_predict_lt_folder, s3_bucket_name, cwd, yamnet_class_map_csv):
+def inference(path,id_micro,file_list, model_path, sample_rate,window_size, threshold, logging, output_wav_folder, output_predict_lt_folder, cwd, yamnet_class_map_csv , num_threads,debug):
+    
     """Perform inference on one or more audio files.
 
     Args:
@@ -37,38 +43,66 @@ def inference(path,id_micro,file_list, model_path, sample_rate, chunk_size, wind
         window_size (float, optional): Window size in seconds. If None, process the entire file at once.
         threshold (float, optional): Threshold for classification.
     """
+    
     logging.info("")
     logging.info("Making inference")
 
     # ---------------------------
     # INIZIALATIN PROCESSING FILE
     # ---------------------------
+    t0_list_processed = time.perf_counter()
+
     processed_files_txt = os.path.join(path, "processed_predictions.txt")
     processed_files_txt = processed_files_txt.replace("wav_files", "predictions_litle")
     logging.info(f"Saving the processed file txt here --> {processed_files_txt}")
     
     processed_files = load_processed_files(processed_files_txt)
+
+    t1_list_processed = time.perf_counter()
     
     # --------------------------------------------------------
     # 1) create the TFLite interpreter
     # --------------------------------------------------------
     logging.info("Setting the TF Model and loading the classes")
     
+    t0_load_model = time.perf_counter()
     if model_path is not None:
-        interpreter = tflite.Interpreter(model_path=model_path)
+
+        interpreter = tflite.Interpreter(
+                                        model_path     =       model_path,
+                                        num_threads    =       num_threads
+                                        )
         logging.info(f"Model path --> {model_path}")
     else:
         raise Exception('Model Path doesnt exist.')
     
     yamnet_classes_csv = os.path.join(cwd, yamnet_class_map_csv)
     yamnet_classes = class_names_csv(yamnet_classes_csv)
+
+    t1_load_model = time.perf_counter()
     logging.info("Classes map loaded")
 
 
     # --------------------
     # Processing audio files
     # --------------------
+    t0_input_details = time.perf_counter()
+    logging.info("INTERPRETER --> Get input/output details")
+    input_details = interpreter.get_input_details()
+    logging.info(f"Input details --> {input_details}")
+    output_details = interpreter.get_output_details()
+    waveform_input_index = input_details[0]['index']
+    scores_output_index = output_details[0]['index']
+    t1_input_details = time.perf_counter()
+
+    t0_allocate = time.perf_counter()
+    # El modelo ya viene con shape fijo [15600], así que reservamos una vez
+    interpreter.allocate_tensors()
+    t1_allocate = time.perf_counter()
+
+
     for audio_file in file_list:
+        t0_start_audio = time.perf_counter()
         try:
             logging.info("")
             logging.info(f"Processing --> {audio_file}")
@@ -82,58 +116,48 @@ def inference(path,id_micro,file_list, model_path, sample_rate, chunk_size, wind
             # -----------------------------------------------------------
             # csv file name and folder
             # -----------------------------------------------------------
-            wav_filename = os.path.basename(audio_file)  # e.g. 20250108_142606.wav
-            logging.info(f"WAV file name --> {wav_filename}")
 
+            t0_filenames = time.perf_counter()
+
+            wav_filename = os.path.basename(audio_file)  # e.g. 20250108_142606.wav
             # name wave file
             wav_file_raw = os.path.splitext(wav_filename)[0]
-
             # setting time
             local_tz = datetime.datetime.now().astimezone().tzinfo
             start_timestamp = datetime.datetime.strptime(wav_file_raw, '%Y%m%d_%H%M%S')
             start_timestamp = start_timestamp.replace(tzinfo=local_tz)
-            logging.info(f"Start_timestamp --> {start_timestamp}")
             
+            t1_filenamoes = time.perf_counter()
 
             if window_size is None:
                 csv_filename = wav_filename.replace(".wav", "_tflt.csv")  # e.g. 20250108_142606.csv
             else:
                 csv_filename = wav_filename.replace(".wav", f"_tflt_w_{window_size}.csv")  # e.g. 20250108_142606.csv
-            logging.info(f"CSV filename --> {csv_filename}")
 
 
 
             prediction_folder = os.path.dirname(audio_file).replace(output_wav_folder, output_predict_lt_folder)
             os.makedirs(prediction_folder, exist_ok=True)
-            logging.info(f"Making litRT prediction folder --> {prediction_folder}")
 
             csv_full_path = os.path.join(prediction_folder, csv_filename)
-            logging.info(f"CSV FULL PATH --> {csv_full_path}")
 
 
             # --------------------------------------------------------
-            # 2 get input/output details
+            # 2 get input/output details --> Removed for optimization reasons
             # --------------------------------------------------------
             logging.info("")
-            logging.info("INTERPRETER --> Get input/output details")
-            input_details = interpreter.get_input_details()
-            logging.info(f"Input details --> {input_details}")
-            output_details = interpreter.get_output_details()
-            waveform_input_index = input_details[0]['index']
-            scores_output_index = output_details[0]['index']
-
 
             # --------------------------------------------------------
             # 3 prepare waveform input (0.975s @ 16kHz => 15600 samples)
             # Decode the WAV file
             # -----------------------------------------------------------
-            logging.info("")
-            logging.info("Decoding WAV file")
+            t0_read_audio = time.perf_counter()
             wav_data, sr = sf.read(audio_file, dtype=np.int16)
+            t1_read_audio = time.perf_counter()
             assert wav_data.dtype == np.int16, f'Bad sample type: {wav_data.dtype}'
 
-            waveform = wav_data / 32768.0  # Convert to [-1.0, +1.0]
-            waveform = waveform.astype('float32')
+
+            waveform = wav_data.astype(np.float32) / 32768.0 # Convert to [-1.0, +1.0]
 
             # convert to mono and the sample rate expected by YAMNet
             if len(waveform.shape) > 1:
@@ -143,170 +167,169 @@ def inference(path,id_micro,file_list, model_path, sample_rate, chunk_size, wind
                 #waveform = resampy.resample(waveform, sr, sample_rate)
                 waveform = soxr.resample(waveform, sr, sample_rate)
                 logging.info("Audio file resampled to 16KHz")
-
+            t2 = time.perf_counter()
 
             # -----------------------------------------------------------
             # create a fresh CSV data list for this file
             # -----------------------------------------------------------
-            csv_data = [["id_micro", "Filename", "Timestamp", "Unixtimestamp", "class", "probability"]]
-            
-            if window_size is None:
-                logging.info("")
-                logging.info("Processing the whole audio file")
-                # --------------------------------------------------------
-                # 4 resize input tensor and allocate
-                # --------------------------------------------------------
-                interpreter.resize_tensor_input(waveform_input_index, [waveform.size], strict=False)
-                interpreter.allocate_tensors()
+            with open(csv_full_path, mode="w", newline="") as final_csv:
+                writer = csv.writer(final_csv)
+                writer.writerow(["id_micro", "Filename", "Timestamp", "Unixtimestamp", "class", "probability"])
 
 
-                # --------------------------------------------------------
-                # 5set input tensor and run inference
-                # --------------------------------------------------------
-                interpreter.set_tensor(waveform_input_index, waveform)
-                interpreter.invoke()
-                scores = interpreter.get_tensor(scores_output_index)  # shape (1, 521)
+                if window_size is None:
+                    logging.info("")
+                    logging.info(f"Processing the whole audio file: {audio_file}")
+                    # --------------------------------------------------------
+                    # 4 resize input tensor and allocate
+                    # --------------------------------------------------------
+                    t_inf_start = time.perf_counter()
+                    input_len = int(waveform.shape[0])
+                    interpreter.resize_tensor_input(waveform_input_index, [input_len], strict=False)
+                    interpreter.allocate_tensors()
 
-    
-                # ---------------------------------------------------------
-                # predcition
-                # ---------------------------------------------------------
-                prediction = np.mean(scores, axis=0)
-                # top 3
-                top3_i = np.argsort(prediction)[::-1][:3]
-                top3_classes = [str(yamnet_classes[i]) for i in top3_i]
-                top3_probs = [f"{prediction[i]:.4f}" for i in top3_i]
-                logging.info(f"top 3 prediction --> {top3_classes} \t{top3_probs}")
-
-                #unixtimestamp
-                unix_ts = int(start_timestamp.timestamp())
-
-                csv_data.append([
-                    id_micro,
-                    audio_file,
-                    str(start_timestamp),
-                    unix_ts,
-                    str(top3_classes),
-                    str(top3_probs)
-                ])
-                logging.info("Adding the result to the CSV file")
-                logging.info("")
-
-
-            # -------------------------------
-            # WINDOWED
-            # -------------------------------
-            else:
-                logging.info("")
-                logging.info("Processing windowed audio file")
-
-                window_size_samples = int(window_size * sample_rate)
-                logging.info(f"Window size --> {window_size_samples}")
-                
-                
-                start_idx = 0
-                target_len = 15600
-                hop = target_len
-                interpreter.allocate_tensors()
-                
-                while start_idx < len(waveform):
-                    #end_idx = min(start_idx + window_size_samples, len(waveform))
-                    end_idx = min(start_idx + target_len, len(waveform))
-
-                    #waveform_window = waveform[start_idx:end_idx]
-                    waveform_window = waveform[start_idx:end_idx].astype(np.float32,copy=False)
-
-                    # [NEW] if the last window is shorter than target_len, pad with zeros -> 5: set input tensor and run inference
-                    if waveform_window.shape[0] < target_len:
-                        waveform_window = np.pad(waveform_window, (0,target_len - waveform_window.shape[0]))
-                    waveform_window = np.ascontiguousarray(waveform_window)
-
-                    #logging.info(f"waveform_window --> {waveform_window}")
-                    logging.info(f"Making prediction for file: {audio_file} ")
-                    interpreter.set_tensor(waveform_input_index, waveform_window)
-                    interpreter.invoke()
-                    scores = interpreter.get_tensor(scores_output_index)  # shape (1, 521)
-                    #logging.info(f"Scores --> {scores}")
-                    #logging.info(f"Scores shape --> {scores.shape}")
-
-                    #interpreter.resize_tensor_input(waveform_input_index, [waveform_window.size], strict=False)
-                    #interpreter.allocate_tensors()
 
                     # --------------------------------------------------------
                     # 5set input tensor and run inference
                     # --------------------------------------------------------
-                    #logging.info("Making prediction")
-                    #interpreter.set_tensor(waveform_input_index, waveform_window)
-                    #interpreter.invoke()
-                    #scores = interpreter.get_tensor(scores_output_index)  # shape (1, 521)
-
-
+                    interpreter.set_tensor(waveform_input_index, waveform)
+                    interpreter.invoke()
+                    scores = interpreter.get_tensor(scores_output_index)  
+                    t_inf_end = time.perf_counter()
+        
                     # ---------------------------------------------------------
                     # predcition
                     # ---------------------------------------------------------
                     prediction = np.mean(scores, axis=0)
-                    # top 3
-                    top3_i = np.argsort(prediction)[::-1][:3]
-                    top3_classes = [str(yamnet_classes[i]) for i in top3_i]
-                    top3_probs = [f"{prediction[i]:.4f}" for i in top3_i]
-                    #logging.info(f"top 3 prediction --> {top3_classes} \t{top3_probs}")
 
-                    # timestamp for this window
-                    start_time_s = start_idx / sample_rate
-                    window_timestamp_actual = start_timestamp + datetime.timedelta(seconds=int(start_time_s))
-                    unix_ts = int(window_timestamp_actual.timestamp())
+                    top_i,top_prediction = filter_predictions(prediction,threshold)
                     
+                    if top_i is not None:
+                        top_class = yamnet_classes[top_i]
+                        top_prediction = f"{top_prediction:.4f}"
+                    else:
+                        top_class = []
+                        top_prediction = []
+                    
+
+                    #unixtimestamp
+                    unix_ts = int(start_timestamp.timestamp())
+
+                    """
                     csv_data.append([
                         id_micro,
                         audio_file,
-                        window_timestamp_actual,
+                        str(start_timestamp),
                         unix_ts,
-                        str(top3_classes),
-                        str(top3_probs)
+                        str(top_class),
+                        str(top_prediction)
                     ])
+                    """
+                    writer.writerow([
+                        id_micro,
+                        audio_file,
+                        str(start_timestamp),
+                        unix_ts,
+                        str(top_class),
+                        str(top_prediction)
+                    ])
+                    
 
-                    start_idx = end_idx
-                    #logging.info("Adding the result to the CSV file")
-                    logging.info("")
-                    logging.info(f"Finished prediction for file: {audio_file} ")
+                # -------------------------------
+                # WINDOWED
+                # -------------------------------
+                else:
+                    logging.info(f"Processing windowed audio file: {audio_file}")
+
+                    target_len = 15600
+                    input_buffer = np.zeros((target_len,), dtype=np.float32)
+
+                    t_inf_start = time.perf_counter()
+
+                    for start_idx in range(0, len(waveform), target_len):
+
+                        end_idx = min(start_idx + target_len, len(waveform))
+                        valid_len = end_idx - start_idx
+
+                        input_buffer.fill(0.0)
+                        input_buffer.fill(0.0)
+
+                        t0_set_tensor = time.perf_counter()
+                        interpreter.set_tensor(waveform_input_index, input_buffer)
+                        t1_set_tensor = time.perf_counter()
+
+                        t0_invoke_tensor = time.perf_counter()
+                        interpreter.invoke()
+                        t1_invoke_tensor = time.perf_counter()
+
+                        t0_get_scores = time.perf_counter()
+                        scores = interpreter.get_tensor(scores_output_index)
+                        t1_get_scores = time.perf_counter()
+
+                        prediction = np.mean(scores, axis=0)
+
+                        t0_filter_preds = time.perf_counter()
+                        top_i, top_prediction = filter_predictions(prediction, threshold)
+                        t1_filter_preds = time.perf_counter()
+
+                        if top_i is not None:
+                            top_class = yamnet_classes[top_i]
+                            top_prediction = f"{top_prediction:.4f}"
+                        else:
+                            top_class = []
+                            top_prediction = []
+
+                        start_time_s = start_idx / sample_rate
+                        window_timestamp_actual = start_timestamp + datetime.timedelta(seconds=int(start_time_s))
+                        unix_ts = int(window_timestamp_actual.timestamp())
+
+                        t0_write_row = time.perf_counter()
+                        writer.writerow([
+                            id_micro,
+                            audio_file,
+                            window_timestamp_actual,
+                            unix_ts,
+                            str(top_class),
+                            str(top_prediction)
+                        ])
+                        t1_write_row = time.perf_counter()
+
+                    t_inf_end = time.perf_counter()
 
 
             # -----------------------------------------------------------
             # save csv
             # -----------------------------------------------------------
-            
-            with open(csv_full_path, mode="w", newline="") as final_csv:
-                writer = csv.writer(final_csv)
-                writer.writerows(csv_data)
-            logging.info(f"Final CSV file saved at {csv_full_path}")
 
-            # -------------------
-            # UPLOAD TO BUCKET S3
-            # -------------------
-            if upload_s3 is not None:
-                try:
-                    upload_file_to_s3(csv_full_path, s3_bucket_name, logging)
-                except Exception as e:
-                    logging.error(f"Failed to upload {csv_full_path} to S3: {e}")
-            else:
-                logging.warning("The final CVS final will not be update to the bucket S3")
+            logging.info(f"Final CSV file saved at {csv_full_path}")
 
             
             # ----------------------------
             # MARKING FILE AS PROICESSED
             # ----------------------------
+            t0_update_processed = time.perf_counter()
             update_processed_files(processed_files_txt, audio_file)
+            t1_update_processed = time.perf_counter()
             processed_files.add(audio_file)
-            logging.info(f"Final CSV file added to the processed file. {audio_file}")
-            logging.info(f"Final CSV file added to the processed file. {csv_full_path}")
-
             
             file_end_time = time.time()
             elapsed_time = file_end_time - file_start_time
             logging.info(f"Processing of {audio_file} took {elapsed_time:.2f} seconds")
-            print(f"Processing of {audio_file} took {elapsed_time:.2f} seconds")
-            # exit()
 
+            if debug:
+                logging.info(f"TIMING allocate = {t1_allocate - t0_allocate}")
+                logging.info(f"TIMING filenames = {t1_filenamoes - t0_filenames}")
+                logging.info(f"TIMING filter preds= {t1_filter_preds - t0_filter_preds}")
+                logging.info(f"TIMING get scores= {t1_get_scores - t0_get_scores}")
+                logging.info(f"TIMING input details = {t1_input_details - t0_input_details}")
+                logging.info(f"TIMING invoke tensor = {t1_invoke_tensor - t0_invoke_tensor}")
+                logging.info(f"TIMING write row = {t1_write_row - t0_write_row}")
+                logging.info(f"TIMING listing processed = {t1_list_processed - t0_list_processed}")
+                logging.info(f"TIMING loading model = {t1_load_model - t0_load_model}")
+                logging.info(f"TIMING read audio = {t1_read_audio - t0_read_audio}")
+                logging.info(f"TIMING setting tensor = {t1_set_tensor - t0_set_tensor}")
+                logging.info(f"TIMING updating processed = {t1_update_processed - t0_update_processed}")
+                logging.info(f"TIMING total file processing = {file_end_time - file_start_time}")
 
         # -------------
         # END
@@ -343,8 +366,14 @@ def parse_arguments():
 
     parser.add_argument('-t', '--threshold', type=float, default=None, help='Classification threshold for predictions.')
     parser.add_argument('-m', '--model-path', type=str, default=None, help='Insert the model path to make predictions.')
-    parser.add_argument('-s', '--step', type=int, default=None, help='Range of files to process, e.g. 5 to process every 5th file.')
-    parser.add_argument('-u', '--upload-S3', action='store_true',default=False, help='If provided, upload the final CSV to S3.')
+    parser.add_argument('--num-threads', type=int, default=2,
+                    help='Number of TFLite threads')
+    parser.add_argument('-s','--step', type=int, default=5 , help='Step of files to process, default is 5 (process every 5 files)')
+    parser.add_argument(
+    "-d","--debug",
+    action="store_true",
+    help="Activa el modo debug"
+    )
     return parser.parse_args()
 
 
@@ -380,6 +409,10 @@ def main():
         # PARSE ARGUMENTS & CONFIG
         # ----------------------------
         #WAV PÀTH
+
+        if args.num_threads:
+            num_threads = args.num_threads
+
         if args.path:
             path = args.path
         else:
@@ -401,7 +434,7 @@ def main():
             model_path = args.model_path
         else:
             model_path = "/root/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
-        model_path = "/root/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
+        
         # WINDOW
         if args.window_size:
             window_size = args.window_size
@@ -413,36 +446,35 @@ def main():
             threshold = args.threshold
         else:
             threshold = None
-
-        # UPLOAD BUCKET S3
-        if args.upload_S3:
-            upload_s3 = args.upload_S3
-        else:
-            upload_s3 = None
-
+        
         if args.step:
             step = args.step
         else:
             step = 5
 
+        if args.debug:
+            debug = True
+        else:
+            debug = False
+
     except Exception as e:
         logging.error(f"Error getting the config info: {e}")
-        return
-    
-    logging.info(f"Path: {path}")
-    logging.info(f"ID Micro: {id_micro}")
-    logging.info(f"Model path: {model_path}")
-    logging.info(f"Window size: {window_size}")
-    logging.info(f"Probability treshold: {threshold}")
-    logging.info(f"Upload to bucket S3: {upload_s3}")
 
+    if not path : path = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/wav_files"
+    if not id_micro : id_micro = ""
+    if not model_path : model_path = "/root/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
+    if not window_size : window_size = 3
+    if not threshold : threshold = 0.3
+    if not step : step = 5
 
+    if debug : logging.info(f"Path: {path}")
+    if debug : logging.info(f"ID Micro: {id_micro}")
+    if debug : logging.info(f"Model path: {model_path}")
+    if debug : logging.info(f"Window size: {window_size}")
+    if debug : logging.info(f"Probability treshold: {threshold}")
+    if debug : logging.info(f"Step between samples : {step}")
+    if debug : logging.info(f"Debugging : {debug}")
 
-    # -----------------------
-    # GETTING AUDIO FILES
-    # -----------------------
-    audio_files = []
-    full_paths = []
 
     try:
         audio_files = sorted([f for f in os.listdir(path) if f.lower().endswith('.wav')])
@@ -456,34 +488,24 @@ def main():
     logging.info(f"Found {len(audio_files)} audio files: {audio_files}")
 
 
-    # ----------
-    # INFERENCE
-    # ----------
     try:
         inference(
             path=path,
             file_list=full_paths,
-            
             id_micro=id_micro,
             model_path=model_path,
             yamnet_class_map_csv=prediction_yamnet_class_map_csv,
-            
             sample_rate=prediction_sample_rate,
-            chunk_size=prediction_chunk_size,
             window_size=window_size,
             threshold=threshold,
-            
-            upload_s3=upload_s3,
-            
             output_wav_folder=storage_output_wav_folder,
             output_predict_lt_folder=storage_output_predict_lt_folder,
-            s3_bucket_name=storage_s3_bucket_name,
-            
             cwd=cwd,
-            
-            logging=logging
+            num_threads = num_threads,    
+            logging=logging,
+            debug=debug
         )
-        logging.info("Inference finished.")
+
     
     except Exception as e:
         logging.error(f"Error making inference: {e}")
