@@ -463,7 +463,7 @@ def main():
     if not path : path = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/wav_files"
     if not id_micro : id_micro = ""
     if not model_path : model_path = "/root/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
-    if not window_size : window_size = 3
+    if not window_size : window_size = 1
     if not threshold : threshold = 0.3
     if not step : step = 5
 
