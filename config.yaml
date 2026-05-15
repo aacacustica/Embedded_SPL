@@ -1,5 +1,7 @@
 # config.yaml
-
+device_type:
+  name:"sensor"
+  
 device:
   id_micro: "RP-1"
 

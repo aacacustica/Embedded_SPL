@@ -134,10 +134,13 @@ def load_config_acoustic(yaml_path: str) -> dict:
     return id_micro, location_record, location_place, location_point, audio_sample_rate, audio_window_size, audio_calibration_constant, storage_s3_bucket_name, storage_output_wav_folder, storage_output_acoust_folder,calibration_constants_folder
 
 def load_config_inference(yaml_path: str, cwd: str) -> dict:
+    
     with open(yaml_path, 'r') as file:
+
         config = yaml.safe_load(file)
 
         id_micro = config["device"]["id_micro"]
+        name_device = config["device_type"]["name"]
 
         location_record = config["location"]["record"]
         location_place = config['location']['place']
@@ -155,7 +158,7 @@ def load_config_inference(yaml_path: str, cwd: str) -> dict:
         prediction_model_tf = os.path.join(cwd, config['prediction']['model_tf'])
         prediction_model_tflt = os.path.join(cwd, config['prediction']['model_tflt'])
 
-    return id_micro, location_record, location_place, location_point, storage_s3_bucket_name, storage_output_wav_folder, storage_output_acoust_folder, storage_output_predict_folder, storage_output_predict_lt_folder, prediction_yamnet_class_map_csv, prediction_sample_rate, prediction_chunk_size, prediction_model_tf, prediction_model_tflt
+    return name_device,id_micro, location_record, location_place, location_point, storage_s3_bucket_name, storage_output_wav_folder, storage_output_acoust_folder, storage_output_predict_folder, storage_output_predict_lt_folder, prediction_yamnet_class_map_csv, prediction_sample_rate, prediction_chunk_size, prediction_model_tf, prediction_model_tflt
 
 def class_names_csv(class_map_csv):
     import numpy as np

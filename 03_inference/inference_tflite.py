@@ -395,7 +395,7 @@ def main():
         
         logging.info("Getting the element form the yamnl file")
         try: 
-            id_micro, location_record, location_place, location_point, storage_s3_bucket_name, \
+            name_device,id_micro, location_record, location_place, location_point, storage_s3_bucket_name, \
             storage_output_wav_folder, storage_output_acoust_folder, storage_output_predict_folder, \
             storage_output_predict_lt_folder, prediction_yamnet_class_map_csv, prediction_sample_rate, \
             prediction_chunk_size, _, prediction_model_tflt= load_config_inference('config.yaml',cwd)
@@ -433,7 +433,9 @@ def main():
         if args.model_path:
             model_path = args.model_path
         else:
-            model_path = "/root/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
+            if name_device == "sensor": model_path = "/root/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
+            elif name_device == "RB" : model_path = "/home/pi/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
+            
         
         # WINDOW
         if args.window_size:
@@ -460,9 +462,13 @@ def main():
     except Exception as e:
         logging.error(f"Error getting the config info: {e}")
 
-    if not path : path = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/wav_files"
+    if not path :
+        if name_device == "sensor": path = "/root/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/wav_files"
+        elif name_device =="RB" : path = "/home/pi/data/NOISEPORT-TENERIFE/3-Medidas/P1_CONTENEDORES/AUDIOMOTH/wav_files"
     if not id_micro : id_micro = ""
-    if not model_path : model_path = "/root/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
+    if not model_path :
+        if name_device == "sensor": model_path = "/root/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
+        elif name_device == "RB" : model_path = "/home/pi/IoT_microphone_scripts-main/03_inference/yamnet.tflite"
     if not window_size : window_size = 1
     if not threshold : threshold = 0.3
     if not step : step = 5

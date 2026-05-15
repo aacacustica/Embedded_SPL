@@ -211,7 +211,7 @@ def main():
             t0_config = time.perf_counter()
 
             
-            id_micro, location_record, location_place, location_point, \
+            name_device,id_micro, location_record, location_place, location_point, \
             audio_sample_rate, audio_window_size, audio_calibration_constant, \
             storage_s3_bucket_name, storage_output_wav_folder, \
             storage_output_acoust_folder, calibration_constants_folder = load_config_acoustic('config.yaml')
