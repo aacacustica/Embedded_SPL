@@ -250,6 +250,8 @@ def find_audiomoth_folders(base_path: str):
             yield root
 
 def get_valid_audio_files(audio_path, processed_txt_path):
+
+
     processed_files = load_processed_files(processed_txt_path)
     audio_files = get_audiofiles(audio_path)
 
@@ -266,7 +268,16 @@ def get_valid_audio_files(audio_path, processed_txt_path):
     
     valid_audio_files = sorted(valid_audio_files)
 
-    return valid_audio_files
+    hour_to_process_list_path = os.path.join(audio_path, "processing_files.txt")
+
+    with open(hour_to_process_list_path, "r") as f:
+            files_to_process_list = [
+                os.path.join(audio_path, line.strip())
+                for line in f
+                if line.strip()
+            ]
+
+    return files_to_process_list
 
 def update_processed_files(processed_file_path, filename):
     """Append a processed filename to the text file."""

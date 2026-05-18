@@ -18,7 +18,7 @@ import warnings
 
 from utils import load_config_inference, class_names_csv, upload_file_to_s3
 from logging_config import setup_logging
-
+from pathlib import Path
 
 #removing 
 warnings.filterwarnings("ignore", 
@@ -394,11 +394,14 @@ def main():
         
         
         logging.info("Getting the element form the yamnl file")
+        
         try: 
+
             name_device,id_micro, location_record, location_place, location_point, storage_s3_bucket_name, \
             storage_output_wav_folder, storage_output_acoust_folder, storage_output_predict_folder, \
             storage_output_predict_lt_folder, prediction_yamnet_class_map_csv, prediction_sample_rate, \
             prediction_chunk_size, _, prediction_model_tflt= load_config_inference('config.yaml',cwd)
+
             logging.info("Config loaded successfully")
         except Exception as e:
             logging.error(f"Error loading config: {e}")
@@ -483,10 +486,22 @@ def main():
 
 
     try:
-        audio_files = sorted([f for f in os.listdir(path) if f.lower().endswith('.wav')])
-        audio_files = audio_files[::step]  # Process every nth file based on the specified range given in the arguments
+        
+        audio_files = sorted([
+            f for f in os.listdir(path)
+            if f.lower().endswith(".wav")
+        ])
 
-        full_paths = [os.path.join(path, file) for file in audio_files]
+        hour_to_process_list_path = os.path.join(path, "processing_files.txt")
+
+        with open(hour_to_process_list_path, "r") as f:
+            files_to_process_list = [
+                os.path.join(path, line.strip())
+                for line in f
+                if line.strip()
+            ]
+
+
     except Exception as e:
         logging.error(f"Error getting the audio files: {e}")
         return
@@ -497,7 +512,7 @@ def main():
     try:
         inference(
             path=path,
-            file_list=full_paths,
+            file_list=files_to_process_list,
             id_micro=id_micro,
             model_path=model_path,
             yamnet_class_map_csv=prediction_yamnet_class_map_csv,
