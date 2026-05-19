@@ -161,9 +161,11 @@ def load_config_record(yaml_path: str) -> dict:
 
 def load_config_acoustic(yaml_path: str) -> dict:
     with open(yaml_path, 'r') as file:
+
         config = yaml.safe_load(file)
 
         id_micro = config["device"]["id_micro"]
+        device_name = config["device_type"]["name"]
 
         location_record = config["location"]["record"]
         location_place = config['location']['place']
@@ -178,7 +180,7 @@ def load_config_acoustic(yaml_path: str) -> dict:
         storage_output_wav_folder = config['storage']['output_wav_folder']
         storage_output_acoust_folder = config['storage']['output_acoust_folder']
         
-    return id_micro, location_record, location_place, location_point, audio_sample_rate, audio_window_size, audio_calibration_constant, storage_s3_bucket_name, storage_output_wav_folder, storage_output_acoust_folder,calibration_constants_folder
+    return device_name,id_micro, location_record, location_place, location_point, audio_sample_rate, audio_window_size, audio_calibration_constant, storage_s3_bucket_name, storage_output_wav_folder, storage_output_acoust_folder,calibration_constants_folder
 
 def load_config_inference(yaml_path: str, cwd: str) -> dict:
     with open(yaml_path, 'r') as file:
@@ -276,7 +278,7 @@ def get_valid_audio_files(audio_path, processed_txt_path):
                 for line in f
                 if line.strip()
             ]
-
+    logging.info(f"Processing this hour recording range in this iteration: {files_to_process_list}")
     return files_to_process_list
 
 def update_processed_files(processed_file_path, filename):
