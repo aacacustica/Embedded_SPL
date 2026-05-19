@@ -205,7 +205,7 @@ def main():
             logging.info(f"Using device index: {device_index}")
         except Exception as e:
             logging.error(f"Error getting the device index: {e}")
-            return
+            sys.exit(1)
 
 
 

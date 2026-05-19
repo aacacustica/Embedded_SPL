@@ -16,7 +16,8 @@ import tflite_runtime.interpreter as tflite
 
 import warnings
 
-from utils import load_config_inference, class_names_csv, upload_file_to_s3
+from utils import load_config_inference, class_names_csv
+from inference_utils import *
 from logging_config import setup_logging
 from pathlib import Path
 
@@ -27,12 +28,7 @@ warnings.filterwarnings("ignore",
                         )
 
 
-def filter_predictions(predictions,threshold):
-    top_i = int(np.argmax(predictions))
-    top_pred = float(predictions[top_i])
-    if top_pred > threshold:
-        return top_i, top_pred
-    return None, None
+
 
 def inference(path,id_micro,file_list, model_path, sample_rate,window_size, threshold, logging, output_wav_folder, output_predict_lt_folder, cwd, yamnet_class_map_csv , num_threads,debug):
     
@@ -340,19 +336,11 @@ def inference(path,id_micro,file_list, model_path, sample_rate,window_size, thre
 
 
 
-def load_processed_files(processed_file_path):
-    """Load the set of processed filenames from a text file."""
-    if os.path.exists(processed_file_path):
-        with open(processed_file_path, "r") as f:
-            return {line.strip() for line in f if line.strip()}
-    return set()
 
 
 
-def update_processed_files(processed_file_path, filename):
-    """Append a processed filename to the text file."""
-    with open(processed_file_path, "a") as f:
-        f.write(filename + "\n")
+
+
 
 
 

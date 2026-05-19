@@ -80,7 +80,7 @@ struct Biquad {
 // ============================================================
 //
 // Cadena de biquads.
-// Sirve para filtros A/C y, si quisieras, cualquier filtro SOS.
+// Sirve para filtros A/C y, si se quisiera, cualquier filtro SOS.
 //
 struct BiquadCascade {
     std::vector<Biquad> sections;
@@ -116,7 +116,7 @@ struct BiquadCascade {
 // Entrada esperada desde Python:
 //     sos_bank.shape == (nbands, nsec, 6)
 //
-// Por ejemplo, en tu caso:
+// Nuestro caso:
 //     nbands = 25
 //     nsec   = 4
 //     6 coeficientes por sección:

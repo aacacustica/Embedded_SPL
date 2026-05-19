@@ -82,6 +82,7 @@ class LeqLevelOct:
         )
 
     def process_audio_files(self,x, audio_file, mode="no_bands"):
+
         """
         Returns:
         all_data: list of per-file rows
@@ -116,7 +117,9 @@ class LeqLevelOct:
             compute_bands,
         )
 
-        name_split = os.path.splitext(audio_file)[0]
+        filename = os.path.basename(audio_file)
+        name_split = os.path.splitext(filename)[0]
+
         start_timestamp = datetime.datetime.strptime(
             name_split,
             "%Y%m%d_%H%M%S"
