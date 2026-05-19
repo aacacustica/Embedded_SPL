@@ -222,7 +222,7 @@ def main():
 
         except Exception as e:
             logging.error(f"Error loading config: {e}")
-            return
+            sys.exit(1)
 
 
 
